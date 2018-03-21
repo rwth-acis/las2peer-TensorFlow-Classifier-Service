@@ -1,6 +1,7 @@
 language: java
+os:
+  - osx
 jdk:
-#- openjdk7
-- oraclejdk8
+  - oraclejdk8
 script: "ant all"
-sudo: true
+sudo: required
