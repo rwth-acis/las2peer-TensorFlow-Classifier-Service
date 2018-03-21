@@ -13,3 +13,6 @@ before_install:
     - echo $(ant -version)
 
 script: "ant all"
+
+after_success:
+  - bash <(curl -s https://codecov.io/bash)
