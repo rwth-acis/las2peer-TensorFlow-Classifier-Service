@@ -6,4 +6,6 @@ jdk: oraclejdk8
 
 sudo: required
 
+install: ant deps
+
 script: "ant all"
