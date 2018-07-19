@@ -1,4 +1,4 @@
-package i5.las2peer.services.tensorFlowTest;
+package i5.las2peer.services.tensorFlowClassifier;
 
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
@@ -17,6 +17,7 @@ import i5.las2peer.p2p.LocalNode;
 import i5.las2peer.p2p.LocalNodeManager;
 import i5.las2peer.security.ServiceAgentImpl;
 import i5.las2peer.security.UserAgentImpl;
+import i5.las2peer.services.tensorFlowClassifier.TensorFlowClassifier;
 import i5.las2peer.testing.MockAgentFactory;
 
 /**
@@ -57,7 +58,7 @@ public class ServiceTest {
 		// XXX starting with las2peer v0.7.3 this block can be simplified with:
 		// node.startService(new ServiceNameVersion(TemplateService.class.getName(), "1.0"), "a pass");
 		ServiceAgentImpl testService = ServiceAgentImpl
-				.createServiceAgent(new ServiceNameVersion(TensorFlowService.class.getName(), "1.0"), "a pass");
+				.createServiceAgent(new ServiceNameVersion(TensorFlowClassifier.class.getName(), "1.0"), "a pass");
 		testService.unlock("a pass");
 		node.storeAgent(testService);
 		node.registerReceiver(testService);
