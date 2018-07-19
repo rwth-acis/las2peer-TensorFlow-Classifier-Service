@@ -4,6 +4,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.util.HashMap;
 
+import org.apache.commons.lang3.math.NumberUtils;
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
@@ -17,7 +18,6 @@ import i5.las2peer.p2p.LocalNode;
 import i5.las2peer.p2p.LocalNodeManager;
 import i5.las2peer.security.ServiceAgentImpl;
 import i5.las2peer.security.UserAgentImpl;
-import i5.las2peer.services.tensorFlowClassifier.TensorFlowClassifier;
 import i5.las2peer.testing.MockAgentFactory;
 
 /**
@@ -33,7 +33,7 @@ public class ServiceTest {
 	private static UserAgentImpl testAgent;
 	private static final String testPass = "adamspass";
 
-	private static final String mainPath = "template/";
+	private static final String mainPath = "classifier/";
 
 	/**
 	 * Called before a test starts.
@@ -106,17 +106,16 @@ public class ServiceTest {
 
 			client.setLogin(testAgent.getIdentifier(), testPass);
 			String params = "{\"message\":\"Java\"}";
-			ClientResponse result = client.sendRequest("POST", mainPath + "classify", params, "application/json",
+			ClientResponse result = client.sendRequest("POST", mainPath + "inference", params, "application/json",
 					"text/html", new HashMap<String, String>());
 			System.out.println(result.getResponse());
 			Assert.assertEquals(200, result.getHttpCode());
-			Assert.assertTrue(result.getResponse().trim().contains("java")); // YOUR RESULT VALUE HERE
+			Assert.assertTrue(NumberUtils.isNumber(result.getResponse().trim())); // YOUR RESULT VALUE HERE
 			System.out.println("Result of 'testGet': " + result.getResponse().trim());
 		} catch (Exception e) {
 			e.printStackTrace();
 			Assert.fail(e.toString());
 		}
 	}
-
 
 }
