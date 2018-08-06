@@ -105,7 +105,7 @@ public class ServiceTest {
 			client.setConnectorEndpoint(connector.getHttpEndpoint());
 
 			client.setLogin(testAgent.getIdentifier(), testPass);
-			String params = "{\"message\":\"Java\"}";
+			String params = "{\"message\":\"Java\",\"model\": \"test\"}";
 			ClientResponse result = client.sendRequest("POST", mainPath + "inference", params, "application/json",
 					"text/html", new HashMap<String, String>());
 			System.out.println(result.getResponse());

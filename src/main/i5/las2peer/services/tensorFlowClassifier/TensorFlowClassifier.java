@@ -1,7 +1,12 @@
 package i5.las2peer.services.tensorFlowClassifier;
 
+import java.io.BufferedReader;
+import java.io.BufferedWriter;
 import java.io.File;
+import java.io.FileReader;
+import java.io.FileWriter;
 import java.io.IOException;
+import java.io.Serializable;
 import java.net.HttpURLConnection;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
@@ -26,7 +31,9 @@ import org.tensorflow.SavedModelBundle;
 import org.tensorflow.Session;
 import org.tensorflow.Tensor;
 
+import i5.las2peer.api.Context;
 import i5.las2peer.api.ManualDeployment;
+import i5.las2peer.api.execution.InternalServiceException;
 import i5.las2peer.logging.bot.BotContentGenerator;
 import i5.las2peer.logging.bot.BotStatus;
 import i5.las2peer.restMapper.RESTService;
@@ -39,6 +46,7 @@ import io.swagger.annotations.Contact;
 import io.swagger.annotations.Info;
 import io.swagger.annotations.License;
 import io.swagger.annotations.SwaggerDefinition;
+import net.minidev.json.JSONArray;
 import net.minidev.json.JSONObject;
 import net.minidev.json.parser.JSONParser;
 import net.minidev.json.parser.ParseException;
@@ -72,7 +80,7 @@ import net.minidev.json.parser.ParseException;
 @ManualDeployment
 public class TensorFlowClassifier extends RESTService implements BotContentGenerator {
 	HashMap<String, Integer> dictionary;
-
+	private static String DATA_PROCESSING_SERVICE = "i5.las2peer.services.mobsos.successModeling.MonitoringDataProvisionService@0.7.0";
 	int[][] array = new int[1][];
 	int[][] array2 = new int[1][];
 
@@ -90,24 +98,69 @@ public class TensorFlowClassifier extends RESTService implements BotContentGener
 		return new String(encoded, encoding);
 	}
 
-	public void load_data() {
+	public boolean load_data(String model) {
 		HashMap<String, Integer> data = new HashMap<String, Integer>();
 		try {
-			String json = readFile("model/dictionary.json", StandardCharsets.UTF_8);
+			String json = readFile(pythonScriptPath + "/export/" + model + "/dictionary.json", StandardCharsets.UTF_8);
 			JSONParser p = new JSONParser(JSONParser.MODE_PERMISSIVE);
 			JSONObject j = (JSONObject) p.parse(json);
 			for (HashMap.Entry<String, Object> e : j.entrySet()) {
 				data.put(e.getKey(), (Integer) e.getValue());
 			}
 		} catch (IOException e) {
-			// TODO Auto-generated catch block
 			e.printStackTrace();
+			return false;
 		} catch (ParseException e1) {
-			// TODO Auto-generated catch block
 			e1.printStackTrace();
+			return false;
 		}
-		array[0] = new int[43];
+
+		int m = 0;
+		File folder = new File(pythonScriptPath + "/corpus/" + model);
+		File[] listOfFiles = folder.listFiles();
+
+		File folder2 = new File(pythonScriptPath + "/data");
+		File[] listOfFiles2 = folder2.listFiles();
+
+		if (listOfFiles == null) {
+			for (int i = 0; i < listOfFiles2.length; i++) {
+				if (listOfFiles2[i].isFile() && !listOfFiles2[i].isHidden()
+						&& !listOfFiles2[i].getName().startsWith(".")) {
+					try (BufferedReader br = new BufferedReader(new FileReader(listOfFiles2[i]))) {
+						String line;
+						File file = new File(pythonScriptPath + "/corpus/" + model + "/" + listOfFiles2[i].getName());
+						file.getParentFile().mkdirs();
+						BufferedWriter writer = new BufferedWriter(new FileWriter(file));
+						while ((line = br.readLine()) != null) {
+							line = cleanString(line.trim());
+							writer.write(line + "\n");
+						}
+						writer.close();
+					} catch (Exception e) {
+						e.printStackTrace();
+					}
+				}
+			}
+			listOfFiles2 = folder2.listFiles();
+		}
+
+		for (int i = 0; i < listOfFiles.length; i++) {
+			if (listOfFiles[i].isFile()) {
+				try (BufferedReader br = new BufferedReader(new FileReader(listOfFiles[i]))) {
+					String line;
+					while ((line = br.readLine()) != null) {
+						String[] lr = line.split(" ");
+						if (lr.length > m)
+							m = lr.length;
+					}
+				} catch (Exception e) {
+
+				}
+			}
+		}
+		array[0] = new int[m];
 		dictionary = data;
+		return true;
 	}
 
 	public String cleanString(String s) {
@@ -138,11 +191,6 @@ public class TensorFlowClassifier extends RESTService implements BotContentGener
 	public TensorFlowClassifier() {
 		super();
 		setFieldValues();
-		if (dictionary == null)
-			load_data();
-		try (Graph g = new Graph()) {
-			s = SavedModelBundle.load("model", "serve").session();
-		}
 	}
 
 	/**
@@ -162,17 +210,19 @@ public class TensorFlowClassifier extends RESTService implements BotContentGener
 			value = { @ApiResponse(
 					code = HttpURLConnection.HTTP_OK,
 					message = "REPLACE THIS WITH YOUR OK MESSAGE") })
-	public Response classifyREST(String content) {
+	public Response inferenceREST(String content) {
 		JSONParser parser = new JSONParser(JSONParser.MODE_PERMISSIVE);
 		String input = "";
+		String model = "";
 		try {
 			JSONObject params = (JSONObject) parser.parse(content);
 			input = (String) params.get("message");
+			model = (String) params.get("model");
 		} catch (ParseException e) {
 			e.printStackTrace();
 			System.out.println(e.getMessage());
 		}
-		String returnstr = (String) inference("", input);
+		String returnstr = (String) inference(model, input);
 
 		return Response.ok().entity(returnstr).build();
 
@@ -195,18 +245,25 @@ public class TensorFlowClassifier extends RESTService implements BotContentGener
 		try {
 			JSONParser parser = new JSONParser(JSONParser.MODE_PERMISSIVE);
 			JSONObject params = (JSONObject) parser.parse(content);
+			JSONObject data = new JSONObject();
 			out_dir = (String) params.get("out_dir");
 			if (botStatus.get(out_dir) == null) {
 				botStatus.put(out_dir, BotStatus.DISABLED);
 			}
 			if (botStatus.get(out_dir) == BotStatus.READY || botStatus.get(out_dir) == BotStatus.DISABLED) {
+
 				botLog.put(out_dir, "Training start!\n");
 				botStatus.put(out_dir, BotStatus.TRAINING);
 
 				double learning_rate = (double) params.get("learning_rate");
 				int num_training_steps = (int) params.get("num_train_steps");
+				data.put("service", params.getAsString("service"));
+				data.put("unit", params.getAsString("unit"));
+				data.put("type", params.getAsString("type"));
 				// int epoch_step = num_training_steps * ((int) params.get("epoch_step"));
-				text = train(out_dir, "", learning_rate, num_training_steps, 1);
+				System.out.println("starting training");
+				System.out.println(data.toJSONString());
+				text = train(out_dir, data.toJSONString(), learning_rate, num_training_steps, 1);
 
 			} else if (botStatus.get(out_dir) == BotStatus.TRAINING) {
 				return Response.status(Response.Status.CONFLICT).entity("Currently training").build();
@@ -216,7 +273,7 @@ public class TensorFlowClassifier extends RESTService implements BotContentGener
 			e.printStackTrace();
 			System.out.println(e.getMessage());
 		}
-		return Response.ok().entity("").build();
+		return Response.ok().entity("Training started!").build();
 	}
 
 	public String codeToString(int code) {
@@ -237,7 +294,7 @@ public class TensorFlowClassifier extends RESTService implements BotContentGener
 	@Override
 	public boolean trainStep(String out_dir, String input, String output) {
 		try {
-			ProcessBuilder builder = new ProcessBuilder("python", pythonScriptPath + "\\train.py", input, output);
+			ProcessBuilder builder = new ProcessBuilder("python", "train.py", input, output);
 			builder.directory(new File(pythonScriptPath).getAbsoluteFile()); // this is where you set the root folder
 																				// for the executable to run with
 			builder.redirectErrorStream(true);
@@ -267,7 +324,11 @@ public class TensorFlowClassifier extends RESTService implements BotContentGener
 
 	@Override
 	public Object inference(String out_dir, String input) {
-		long[] res = new long[1];
+		load_data(out_dir);
+		try (Graph g = new Graph()) {
+			s = SavedModelBundle.load(pythonScriptPath + "/export/" + out_dir, "serve").session();
+		}
+		long[] res = new long[72];
 		try {
 			input = cleanString(input);
 			String[] inputs = input.split(" ");
@@ -290,7 +351,7 @@ public class TensorFlowClassifier extends RESTService implements BotContentGener
 			e.printStackTrace();
 			System.out.println(e.getMessage());
 		}
-		return Integer.toString(((int) res[0]) - 1);
+		return Integer.toString(((int) res[0]));
 	}
 
 	@GET
@@ -305,6 +366,8 @@ public class TensorFlowClassifier extends RESTService implements BotContentGener
 					message = "REPLACE THIS WITH YOUR OK MESSAGE") })
 	public Response getStatusREST(@QueryParam("unit") String unit) {
 		BotStatus bs = botStatus.get(unit);
+		if (bs == null)
+			bs = BotStatus.DISABLED;
 		return Response.ok().entity(bs.name()).build();
 	}
 
@@ -369,18 +432,48 @@ public class TensorFlowClassifier extends RESTService implements BotContentGener
 
 	@Override
 	public boolean train(String out_dir, String data, double learning_rate, int num_training_steps, int epochs) {
-
+		try {
+			JSONParser p = new JSONParser(JSONParser.MODE_PERMISSIVE);
+			JSONObject j = (JSONObject) p.parse(data);
+			String service = j.getAsString("service");
+			String unit = j.getAsString("unit");
+			String type = j.getAsString("type");
+			Serializable rmiResult = Context.get().invoke(DATA_PROCESSING_SERVICE, "getTrainingDataSet", service, unit,
+					type);
+			if (rmiResult instanceof JSONArray) {
+				JSONArray ja = (JSONArray) rmiResult;
+				copyFolder(new File(pythonScriptPath + "/corpus/base/"),
+						new File(pythonScriptPath + "/corpus/" + out_dir + "/"));
+				for (Object o : ja) {
+					if (o instanceof JSONObject) {
+						JSONObject jo = (JSONObject) o;
+						File f = new File(
+								pythonScriptPath + "/corpus/" + out_dir + "/" + jo.getAsString("to") + ".txt");
+						f.getParentFile().mkdirs();
+						f.createNewFile();
+						BufferedWriter writer = new BufferedWriter(new FileWriter(
+								pythonScriptPath + "/corpus/" + out_dir + "/" + jo.getAsString("to") + ".txt", true));
+						String toWrite = jo.getAsString("from");
+						toWrite = toWrite.substring(1, toWrite.length() - 1);
+						writer.append(cleanString(toWrite) + "\n");
+						writer.close();
+					}
+				}
+			} else {
+				throw new InternalServiceException(
+						"Unexpected result (" + rmiResult.getClass().getCanonicalName() + ") of RMI call");
+			}
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
 		StringBuilder text = new StringBuilder();
 		Thread t = new Thread() {
 			public void run() {
 				try {
-					java.nio.file.Path modelDir = Paths.get(pythonScriptPath + "/" + out_dir);
-					if (!Files.exists(modelDir)) {
-						copyFolder(new File(pythonScriptPath + "/base"), modelDir.toFile());
-					}
 
-					ProcessBuilder builder = new ProcessBuilder("python3", "train.py", "-out_dir=" + out_dir,
-							"-learning_rate=" + learning_rate, "-num_train_steps=" + num_training_steps);
+					ProcessBuilder builder = new ProcessBuilder("python3", "train.py", out_dir,
+							Double.toString(learning_rate), Integer.toString(num_training_steps),
+							Integer.toString(epochs));
 					builder.directory(new File(pythonScriptPath).getAbsoluteFile()); // this is where you set the root
 																						// folder
 																						// for the executable to run
@@ -405,6 +498,7 @@ public class TensorFlowClassifier extends RESTService implements BotContentGener
 					e.printStackTrace();
 					botStatus.put(out_dir, BotStatus.DISABLED);
 				} catch (Exception e) {
+					e.printStackTrace();
 					System.out.printf("Error");
 					botStatus.put(out_dir, BotStatus.DISABLED);
 				}
